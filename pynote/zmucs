@@ -121,6 +121,7 @@ class ZmucsSteamer():
         
         self.conv_state = None
         
+        
     
     def flush(self):
         """
@@ -131,6 +132,7 @@ class ZmucsSteamer():
         padding = torch.zeros(self.zmucs.chin, self.total_length)
         out = self.feed(padding)
         return out[:, :pending_length]    
+    
     
     def feed(self, chunk, flush_it=False):
         if chunk.dim() !=2:
