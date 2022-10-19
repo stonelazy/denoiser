@@ -10,7 +10,7 @@ import torch as th
 from torch import nn
 from torch.nn import functional as F
 
-from . import dsp
+import dsp
 
 
 class Remix(nn.Module):

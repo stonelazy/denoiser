@@ -12,8 +12,8 @@ import torch as th
 from torch import nn
 from torch.nn import functional as F
 
-from .resample import downsample2, upsample2
-from .utils import capture_init
+from resample import downsample2, upsample2
+from utils import capture_init
 
 
 class BLSTM(nn.Module):
@@ -269,7 +269,10 @@ class DemucsStreamer:
 
     @property
     def time_per_frame(self):
-        return self.total_time / self.frames
+        if self.frames:
+            return self.total_time / self.frames
+        else:
+            return 0
 
     def flush(self):
         """
@@ -354,6 +357,7 @@ class DemucsStreamer:
         stride = self.stride * demucs.resample
         x = frame[None]
         for idx, encode in enumerate(demucs.encoder):
+            # print(f"Shape x:{x.shape}")
             stride //= demucs.stride
             length = x.shape[2]
             if idx == demucs.depth - 1:
@@ -421,7 +425,7 @@ def test():
         description="Benchmark the streaming Demucs implementation, "
                     "as well as checking the delta with the offline implementation.")
     parser.add_argument("--depth", default=5, type=int)
-    parser.add_argument("--resample", default=4, type=int)
+    parser.add_argument("--resample", default=1, type=int)
     parser.add_argument("--hidden", default=48, type=int)
     parser.add_argument("--sample_rate", default=16000, type=float)
     parser.add_argument("--device", default="cpu")
@@ -432,30 +436,53 @@ def test():
         th.set_num_threads(args.num_threads)
     sr = args.sample_rate
     sr_ms = sr / 1000
-    demucs = Demucs(depth=args.depth, hidden=args.hidden, resample=args.resample).to(args.device)
-    x = th.randn(1, int(sr * 4)).to(args.device)
-    out = demucs(x[None])[0]
-    streamer = DemucsStreamer(demucs, num_frames=args.num_frames)
-    out_rt = []
-    frame_size = streamer.total_length
-    with th.no_grad():
-        while x.shape[1] > 0:
-            out_rt.append(streamer.feed(x[:, :frame_size]))
-            x = x[:, frame_size:]
-            frame_size = streamer.demucs.total_stride
-    out_rt.append(streamer.flush())
-    out_rt = th.cat(out_rt, 1)
-    model_size = sum(p.numel() for p in demucs.parameters()) * 4 / 2**20
-    initial_lag = streamer.total_length / sr_ms
-    tpf = 1000 * streamer.time_per_frame
-    print(f"model size: {model_size:.1f}MB, ", end='')
-    print(f"delta batch/streaming: {th.norm(out - out_rt) / th.norm(out):.2%}")
-    print(f"initial lag: {initial_lag:.1f}ms, ", end='')
-    print(f"stride: {streamer.stride * args.num_frames / sr_ms:.1f}ms")
-    print(f"time per frame: {tpf:.1f}ms, ", end='')
-    print(f"RTF: {((1000 * streamer.time_per_frame) / (streamer.stride / sr_ms)):.2f}")
-    print(f"Total lag with computation: {initial_lag + tpf:.1f}ms")
+    
+    
+    for _ in range(0,10): 
+        demucs = Demucs(depth=args.depth, hidden=args.hidden, resample=args.resample).to(args.device)
 
+        x = th.randn(1, int(sr * 1)).to(args.device) 
+        out = demucs(x[None])[0]
+        streamer = DemucsStreamer(demucs, num_frames=args.num_frames)
+        out_rt = []
+        frame_size = streamer.total_length
+        
+        infer_start = time.time()
+        
+        with th.no_grad():
+            while x.shape[1] > 0:
+                out_rt.append(streamer.feed(x[:, :frame_size]))
+                x = x[:, frame_size:]
+                frame_size = streamer.demucs.total_stride
+                
+        infer_end = time.time()-infer_start
+                
+        out_rt.append(streamer.flush())
+        out_rt = th.cat(out_rt, 1)
+        model_size = sum(p.numel() for p in demucs.parameters()) * 4 / 2**20
+        initial_lag = streamer.total_length / sr_ms
+        tpf = 1000 * streamer.time_per_frame
+        print(f"model size: {model_size:.1f}MB, ", end='')
+        print(f"delta batch/streaming: {th.norm(out - out_rt) / th.norm(out):.2%}")
+        print(f"initial lag: {initial_lag:.1f}ms, ", end='')
+        print(f"stride: {streamer.stride * args.num_frames / sr_ms:.1f}ms")
+        print(f"time per frame: {tpf:.1f}ms, ", end='')
+        print(f"Initial frame_size: {streamer.total_length/16:.1f}ms, ")
+        print(f"RTF: {((1000 * streamer.time_per_frame) / (streamer.stride / sr_ms)):.2f}")
+        print(f"Total lag with computation: {initial_lag + tpf:.1f}ms")
+        # print(f"Total infer time RTF: {infer_end/4:.2f}")
+
+def do_forward_pass():
+    import torch
+    demucs = Demucs(depth=3,resample=1)
+    x = th.randn(1, int(16000))
+    out = demucs(x[None])[0]
+    streamer = DemucsStreamer(demucs)
+    out_rt = streamer.feed(x)
+    out_rt = torch.cat([out_rt[0],streamer.flush()[0]]).unsqueeze(1)
+    # out_rt.append(streamer.flush())
+    print(f"delta batch/streaming: {torch.norm(out_rt-out) / torch.norm(out_rt):.2%}")     
 
 if __name__ == "__main__":
     test()
+    # do_forward_pass()

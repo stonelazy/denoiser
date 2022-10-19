@@ -15,11 +15,11 @@ import sys
 import torch
 import torchaudio
 
-from .audio import Audioset, find_audio_files
-from . import distrib, pretrained
-from .demucs import DemucsStreamer
+from audio import Audioset, find_audio_files
+import distrib, pretrained
+from demucs import DemucsStreamer
 
-from .utils import LogProgress
+from utils import LogProgress
 
 logger = logging.getLogger(__name__)
 
