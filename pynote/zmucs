@@ -60,6 +60,7 @@ class Zmucs(nn.Module):
                                    stride=stride)
             ]
             if idx > 0:
+                                
                 decode.append(nn.ReLU())
             self.decoder.insert(0,nn.Sequential(*decode))
             
@@ -121,7 +122,6 @@ class ZmucsSteamer():
         
         self.conv_state = None
         
-        
     
     def flush(self):
         """
@@ -131,7 +131,8 @@ class ZmucsSteamer():
         pending_length = self.pending.shape[1]
         padding = torch.zeros(self.zmucs.chin, self.total_length)
         out = self.feed(padding)
-        return out[:, :pending_length]    
+        return out[:, :pending_length]
+        self.conv_state = None 
     
     
     def feed(self, chunk, flush_it=False):
@@ -152,20 +153,47 @@ class ZmucsSteamer():
         x = frame[None]
         
         skips = []
+        next_state = []
+        
+        zmucs = self.zmucs
+        first = self.conv_state is None
+        stride = self.stride * zmucs.resample
+        
         for idx,encode in enumerate(self.zmucs.encoder):
                 # print(f"Shape x:{x.shape}")
-                x = encode[3](encode[2](encode[1](encode[0](x))))
-                skips.append(x) 
-         
+            length = x.shape[2]
+            stride //= zmucs.stride
+            if not first:
+                prev = self.conv_state.pop(0)
+                prev = prev[..., stride:]
+                tgt = (length - zmucs.kernel_size) // zmucs.stride + 1
+                missing = tgt - prev.shape[-1]
+                offset = length - zmucs.kernel_size - zmucs.stride * (missing - 1)
+                x = x[..., offset:]
+            
+            x = encode[3](encode[2](encode[1](encode[0](x))))
+            if not first:
+                x = torch.cat([prev, x], -1)
+            next_state.append(x)
+            skips.append(x)
+        
         try: 
             for idx, decode in enumerate(self.zmucs.decoder):
                 skip = skips.pop(-1)
-                x = x + skip
+                # x = x + skip - Without conv state
+                x += skip[..., :x.shape[-1]]
                 x = decode[2](decode[1](decode[0](x)))
+                
+                next_state.append(x[..., -zmucs.stride:] - decode[2].bias.view(-1, 1))
+                x = x[..., :-zmucs.stride]
+                
+                if not first:
+                    prev = self.conv_state.pop(0)
+                    x[..., :zmucs.stride] += prev
                 
                 if idx != self.zmucs.depth - 1:
                     x = decode[3](x)
-                    
+        
         except Exception as e:
             print(e)
             print(f"exception at idx {idx}")
@@ -173,16 +201,19 @@ class ZmucsSteamer():
             print(f"encoder {encode}")
             raise ValueError
         # return x[..., :-self.zmucs.stride]
+        self.conv_state = next_state
         return x[0]
 
 
 def get_norm(ta, tb):
+       print("all close ", torch.allclose(ta,tb,0.00001,0.00001))
        print(f"delta batch/streaming: {torch.norm(ta - tb) / torch.norm(ta):.2%}")          
 
 if __name__ == '__main__':
     
+    torch.set_num_threads(5)
     
-    for j in range(0,10): 
+    for j in range(0,1): 
         zmucs = Zmucs(depth=5)   
         sig = torch.randn(1,16000)
         denoised = zmucs(sig)
@@ -193,10 +224,10 @@ if __name__ == '__main__':
         # print('zlen ' + str(zlen))
         streamer = ZmucsSteamer(zmucs)
 
-        infer_start = time.time()
+        infer_start = time.monotonic()
         outs = streamer.feed(sig)
         out_rt = torch.cat([outs[0],streamer.flush()[0]]).unsqueeze(0)
-        infer_end = time.time()-infer_start
+        infer_end = time.monotonic()-infer_start
         print(f"Total infer time RTF: {infer_end:.2f}")
         get_norm(denoised,out_rt)
         print(len(outs))

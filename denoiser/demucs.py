@@ -474,7 +474,7 @@ def test():
 
 def do_forward_pass():
     import torch
-    demucs = Demucs(depth=3,resample=1)
+    demucs = Demucs(depth=5,resample=1)
     x = th.randn(1, int(16000))
     out = demucs(x[None])[0]
     streamer = DemucsStreamer(demucs)
