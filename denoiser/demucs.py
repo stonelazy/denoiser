@@ -417,7 +417,6 @@ class DemucsStreamer:
         self.conv_state = next_state
         return x[0], extra[0]
 
-
 def test():
     import argparse
     parser = argparse.ArgumentParser(

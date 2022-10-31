@@ -57,10 +57,10 @@ class Zmucs(nn.Module):
                 nn.ConvTranspose1d(in_channels=hidden,
                                    out_channels=chout,
                                    kernel_size=kernel_size,
-                                   stride=stride)
+                                   stride=stride,
+                                   bias=True)
             ]
-            if idx > 0:
-                                
+            if idx > 0:                                
                 decode.append(nn.ReLU())
             self.decoder.insert(0,nn.Sequential(*decode))
             
@@ -157,6 +157,7 @@ class ZmucsSteamer():
         
         zmucs = self.zmucs
         first = self.conv_state is None
+        # first = True
         stride = self.stride * zmucs.resample
         
         for idx,encode in enumerate(self.zmucs.encoder):
@@ -165,7 +166,6 @@ class ZmucsSteamer():
             stride //= zmucs.stride
             if not first:
                 prev = self.conv_state.pop(0)
-                prev = prev[..., stride:]
                 tgt = (length - zmucs.kernel_size) // zmucs.stride + 1
                 missing = tgt - prev.shape[-1]
                 offset = length - zmucs.kernel_size - zmucs.stride * (missing - 1)
@@ -174,26 +174,27 @@ class ZmucsSteamer():
             x = encode[3](encode[2](encode[1](encode[0](x))))
             if not first:
                 x = torch.cat([prev, x], -1)
-            next_state.append(x)
+            next_state.append(x[...,stride:])
             skips.append(x)
-        
+
         try: 
             for idx, decode in enumerate(self.zmucs.decoder):
                 skip = skips.pop(-1)
-                # x = x + skip - Without conv state
+
                 x += skip[..., :x.shape[-1]]
                 x = decode[2](decode[1](decode[0](x)))
                 
                 next_state.append(x[..., -zmucs.stride:] - decode[2].bias.view(-1, 1))
+
+                # next_state.append(x[..., -zmucs.stride:])
                 x = x[..., :-zmucs.stride]
-                
+
                 if not first:
                     prev = self.conv_state.pop(0)
                     x[..., :zmucs.stride] += prev
                 
                 if idx != self.zmucs.depth - 1:
                     x = decode[3](x)
-        
         except Exception as e:
             print(e)
             print(f"exception at idx {idx}")
@@ -213,9 +214,9 @@ if __name__ == '__main__':
     
     torch.set_num_threads(5)
     
-    for j in range(0,1): 
+    for j in range(0,10): 
         zmucs = Zmucs(depth=5)   
-        sig = torch.randn(1,16000)
+        sig = torch.randn(1,46000)
         denoised = zmucs(sig)
         denoised = denoised[0]
         # print(denoised[0].shape)
