@@ -6,6 +6,15 @@ from torch import nn
 from torch.nn import functional as F
 
 
+class BLSTM(nn.Module):
+    def __init__(self, dim, layers=2):
+        super().__init__()
+        self.lstm = nn.LSTM(bidirectional=False, num_layers=layers, hidden_size=dim, input_size=dim)
+
+    def forward(self, x, hidden=None):
+        x, hidden = self.lstm(x, hidden)
+        return x, hidden
+
 class Zmucs(nn.Module):
 
     def __init__(self,
@@ -67,6 +76,8 @@ class Zmucs(nn.Module):
             chin=hidden
             chout=hidden
             hidden = min(int(growth * hidden), max_hidden)
+
+        self.lstm = BLSTM(chin,1)
     
     def valid_length(self, length):
         length = math.ceil(length * self.resample)
@@ -94,6 +105,10 @@ class Zmucs(nn.Module):
             x=encode(x)
             skips.append(x)
         
+        x = x.permute(2, 0, 1)
+        x, _ = self.lstm(x)
+        x = x.permute(1, 2, 0)
+        
         for idx, decode in enumerate(self.decoder):
             skip = skips.pop(-1)
             x = x + skip[..., :x.shape[-1]]
@@ -119,7 +134,7 @@ class ZmucsSteamer():
         self.total_length = self.frame_length + resample_lookahead
         
         self.stride = zmucs.total_stride * num_frames
-        
+        self.lstm_state = None
         self.conv_state = None
         
     
@@ -177,6 +192,10 @@ class ZmucsSteamer():
             next_state.append(x[...,stride:])
             skips.append(x)
 
+        x = x.permute(2, 0, 1)
+        x, self.lstm_state = zmucs.lstm(x, self.lstm_state)
+        x = x.permute(1, 2, 0)
+
         try: 
             for idx, decode in enumerate(self.zmucs.decoder):
                 skip = skips.pop(-1)
@@ -185,7 +204,7 @@ class ZmucsSteamer():
                 x = decode[2](decode[1](decode[0](x)))
                 
                 next_state.append(x[..., -zmucs.stride:] - decode[2].bias.view(-1, 1))
-
+                
                 # next_state.append(x[..., -zmucs.stride:])
                 x = x[..., :-zmucs.stride]
 
