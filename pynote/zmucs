@@ -199,7 +199,7 @@ class ZmucsSteamer():
                 missing = tgt - prev.shape[-1]
                 offset = length - zmucs.kernel_size - zmucs.stride * (missing - 1)
                 x = x[..., offset:]
-            
+    
             x = encode[3](encode[2](encode[1](encode[0](x))))
             if not first:
                 x = torch.cat([prev, x], -1)

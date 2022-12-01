@@ -109,21 +109,20 @@ class Umucs:
                 
         next_state = []
         for idx, encode in enumerate(self.encoder):
-                        
+            
+            stride = self.stride // (self.stride_inp ** idx)
+            
             if not first:
-                stride = self.stride // (self.stride_inp ** idx)
-                prev = self.conv_state.pop(0)
-                prev = prev[..., stride:]
-                
-                want = self.get_in(stride,1)
+                want = self.get_in(stride,1) 
                 x = x[..., -want:]
-                # print(f"wasting {abs(x.shape[-1] - want)} at {idx} for input {x.shape[-2]}")
-               
+            
             x = encode(x)
+                 
             if not first:
+                prev = self.conv_state.pop(0)
                 x = torch.cat([prev, x], -1)
 
-            next_state.append(x)
+            next_state.append(x[..., stride:])
         
         self.conv_state = next_state
         return x

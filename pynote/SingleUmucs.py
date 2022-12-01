@@ -23,12 +23,10 @@ class SingUmucs:
         self.stride_inp=4
         
         self.c1 = nn.Conv1d(in_channels=1, out_channels=48, kernel_size=8, stride=4)
+        self.d1 = nn.ConvTranspose1d(in_channels=48, out_channels=1, kernel_size=8, stride=4)
         self.encoder=nn.ModuleList()
         
-        self.encoder.append(self.c1)
-        
-        # self.inp1= torch.randn(1,296)
-        
+        self.encoder.append(self.c1)        
         self.stride = self.stride_inp ** self.depth
         self.frame_length= self.valid_length(1)
 
@@ -86,7 +84,7 @@ class SingUmucs:
     def framed_inp(self,inp):
         return inp.unfold(1,self.valid_length(1),self.stride).squeeze(0)
     
-    def main(self,inp):
+    def main_encoder(self,inp):
         framed_inp = self.framed_inp(inp)        
         self.conv_state = []
         out = []
@@ -95,16 +93,26 @@ class SingUmucs:
         output = torch.stack(out).transpose(0,3).squeeze(0)
         return output
     
+    def main(self,inp):
+        framed_inp = self.framed_inp(inp)        
+        self.conv_state = []
+        out = []
+        for each in framed_inp:
+            out.append(self.pred_frame(each))        
+        output = torch.cat(out,1)
+        return output
+    
     def pred_frame(self,frame):
         x = frame[None]
         x = self.encoder[0](x)
+        # x = self.d1(x)
         return x
-            
+
+
 if __name__ == "__main__":
     umucs = SingUmucs()
     inp = torch.arange(1,1600)[None].float()
-    # umucs.frm_zmucs(inp)
-    online_op = umucs.main(inp)
+    online_op = umucs.main_encoder(inp)
     offl_op = umucs.c1(inp[None])
     diff(offl_op,online_op)
     tol=1e-5
