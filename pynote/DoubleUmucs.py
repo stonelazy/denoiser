@@ -13,7 +13,7 @@ from torch import nn
 from torch.nn import functional as F
 
 def diff(ta, tb):
-       print(f"delta batch/streaming: {torch.norm(ta - tb) / torch.norm(ta):.2%}")
+       print(f"delta batch/streaming: {torch.norm(ta - tb) / torch.norm(ta):.5%}")
 
 class Umucs:
     def __init__(self) -> None:            
@@ -26,9 +26,7 @@ class Umucs:
         
         self.encoder.append(self.c1)
         self.encoder.append(self.c2)
-        
-        # self.inp1= torch.randn(1,296)
-        
+
         self.stride = self.stride_inp ** self.depth
         self.frame_length= self.valid_length(1)
 
@@ -59,34 +57,10 @@ class Umucs:
         len = self.get_out(length,self.depth)
         return self.get_in(len,self.depth)
     
-    def frm_zmucs(self,inp):
-        self.pending = torch.zeros(1, 0)
-        self.pending=torch.cat([self.pending,inp],dim=1)
-        inp_frames = []
-        while self.pending.shape[-1] >= self.frame_length:
-            frame = self.pending[:,:self.frame_length]
-            inp_frames.append(frame)
-            self.pending = self.pending[:,self.stride:] 
-        
-        return inp_frames           
-        
-        
-    def feed(self,inp:torch.Tensor,conv_state):
-        
-        expected_length = self.valid_length(1)
-        assert inp.shape[-1] == expected_length
-        
-        # do_predict(inp)
-        
-        return_values = [
-            inp[:,self.stride:],
-        ]
-        return return_values
-
     def framed_inp(self,inp):
         return inp.unfold(1,self.valid_length(1),self.stride).squeeze(0)
     
-    def main(self,inp):
+    def streaming_convolve(self,inp):
         framed_inp = self.framed_inp(inp)
         # zms_fr = torch.stack(self.frm_zmucs(inp)).transpose(0,1)
         # assert torch.allclose(zms_fr,framed_inp) 
@@ -108,28 +82,22 @@ class Umucs:
         stride = self.stride
         
         next_state = []
-        for idx, encode in enumerate(self.encoder):
+        for each in self.encoder:
             
             stride = stride // self.stride_inp
-            length = x.shape[2]
+            
+            if not first:                
+                exclude_frame_idx = self.get_in(stride, 1)
+                x = x[..., -exclude_frame_idx:]
+
+            x = each(x)
             
             if not first:
                 prev = self.conv_state.pop(0)
                 prev = prev[..., stride:]
-                
-                want = self.get_in(stride,1)
-                x = x[..., -want:]
-                print(f"wasting {length-want} at {idx} for input {length}")
-                
-            x = encode(x)
-            
-            if not first:
                 x = torch.cat([prev, x], -1)
 
             next_state.append(x)
-        
-        if len(self.conv_state) == 1:
-            raise RuntimeError()
         
         self.conv_state = next_state
         return x
@@ -137,11 +105,9 @@ class Umucs:
 if __name__ == "__main__":
     umucs = Umucs()
     inp = torch.randn(1,1600)
-    # umucs.frm_zmucs(inp)
-    online_op = umucs.main(inp)
+    online_op = umucs.streaming_convolve(inp)
     offl_op = umucs.c2(umucs.c1(inp[None]))
     diff(offl_op,online_op)
     tol=1e-5
     assert torch.allclose(offl_op,online_op,tol,tol)
-    # assert torch.allclose(offl_op,online_op)
     print("exit over")
